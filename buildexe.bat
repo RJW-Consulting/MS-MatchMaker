@@ -1,0 +1,1 @@
+build_exe MSLibRepSniffer_GUI_main.py -i MassSpectrum.py -i MSLibListBox.py -i MSLibMatchTree.py -i MSLibMatchTreeItem.py -i MSLibrary.py -i MSMatcher.py -i MSPlotView.py -i MSTagView.py -d .\dist -v -b 3 -r
