@@ -12,6 +12,7 @@ import datetime
 from logging import _startTime
 from datetime import datetime
 import itertools
+import pandas as pd
 import configparser as cp
 import os
 
@@ -40,6 +41,7 @@ class MSMatcher(object):
         self.matches = []
         self.matchPairs = []
         self.message = ''
+        self.checkables = []
         self.numCheckables = 0
         self.checkablesChecked = 0
         self.numMatchables = 0
@@ -116,12 +118,48 @@ class MSMatcher(object):
                     f = open(logfilename,'w')
                     f.writelines(lines)
                     f.close()
-                matchPairs += self.parse_NIST_results(self.nistDirectory+'SRCRESLT.TXT', threshold)
+                newPairs = self.parse_NIST_results(self.nistDirectory+'SRCRESLT.TXT', threshold)
+                matchPairs += newPairs
+                if self.logFileName:
+                    self.export_matches(newPairs,self.logFileName,firstWrite=(recordsDone==0))
             recordsDone += chunkSize
             self.nistCheckablesChecked += chunkSize
         self.nistMatchPairs = matchPairs
         self.nistCheckables = 0
+        self.logFileName = ''
+
+    def export_matches(self,pairs,filename,firstWrite=False):        
+        rows = []
+        if firstWrite:
+            params = "Match Parameters: Match Threshold = "+str(self.likelyTh)+'   Use RI = '+str(self.useRI)+'   RI Margin = '+str(self.marginRI)+'    RI Tag = '+self.riTag
+            rows.append((params,'','','','','','','','','','',''))
+        for pair in pairs:
+            row_fMatch = pair[1]
+            row_rMatch = pair[2]
+            leader = pair[0][0]
+            candidate = pair[0][1]
+            row_leaderUID = leader.get_uid()
+            row_leaderName = leader.get_name()
+            row_leaderRI = leader.get_ri()
+            row_leaderRT2 = leader.get_tag('RT2')
+            row_leaderLib = leader.get_filename()
+            row_cmUID = candidate.get_uid()
+            row_cmName = candidate.get_name()
+            row_cmRI = candidate.get_ri()
+            row_cmRT2 = candidate.get_tag('RT2')
+            row_cmLib = candidate.get_filename()
+            rows.append((row_fMatch,row_rMatch,row_leaderUID,row_leaderName,row_leaderRI,row_leaderRT2,row_leaderLib,row_cmUID,row_cmName,row_cmRI,row_cmRT2,row_cmLib))
+        df = pd.DataFrame(rows,columns = ['Fmatch','Rmatch','Leader UID','Leader Name','Leader RI','Leader RT2','Leader Lib','Candidate Match UID','Candidate Match Name','Candidate Match RI','Candidate Match RT2','Candidate Match Lib'])
+        if filename[-5:].lower() == '.xlsx':
+            df.to_excel(filename, engine='xlsxwriter')
+        elif filename[-4:].lower() == '.csv':
+            wmode = 'a'
+            if firstWrite:
+                wmode = 'w' 
+            df.to_csv(filename,header=firstWrite,sep='\t',mode=wmode)     
     
+    def setLogFileName(self, name):
+        self.logFileName = name
     
     def parse_NIST_results(self,filename,matchThreshold):
         f = open(filename,'r')
@@ -137,39 +175,49 @@ class MSMatcher(object):
                 if not myMSrec:
                     print('cannot find UID '+ourUID)
             if line[0:3].lower() == 'hit':
-                name = line[line.find('<<')+2:line.find('>>;')]
-                line = line[line.find('>>;')+3:]
-                fields = line.split(';')
-                formula = fields[0][fields[0].find(':')+1:].strip().replace('<','').replace('>','')
-                fmatch = int(fields[1][fields[1].find(':')+1:].strip())
-                rmatch = int(fields[2][fields[2].find(':')+1:].strip())
+                response = self.nistLineToDict(line)
+                name = response['Name']
+                formula = response['Formula']
+                fmatch = int(response['MF'])
+                rmatch = int(response['RMF'])
                 if (rmatch >= matchThreshold) and (fmatch >= matchThreshold): 
-                    prob = float(fields[3][fields[3].find(':')+1:].strip())
-                    casnum = fields[4][fields[4].find(':')+1:].strip()
-                    molwt = fields[5][fields[5].find(':')+1:].strip()
-                    lib = fields[6][fields[6].find(':')+1:].strip()
-                    libid = fields[7][fields[7].find(':')+1:].strip()
-                    ri=''
-                    if len(fields) > 8:
-                        ri= fields[8][fields[8].find(':')+1:].strip()
+                    prob = response['Prob']
+                    casnum = response['CAS']
+                    molwt = response['Mw']
+                    lib = response['Lib']
+                    libid = response['Id']
+                    ri = response['RI'].replace('.','')
                     theirMSrec = self.fromLib.get_ms_with_uid(name)
                     if myMSrec.get_uid() != name:
-                        theirMSrec = MassSpectrum(self.parent, libid, lib+libid, fromNIST=True)
-                        theirMSrec.set_name(name)
-                        theirMSrec.set_tag('Formula',formula)
-                        theirMSrec.set_tag('CAS#',casnum)
-                        theirMSrec.set_tag('MW',molwt)
-                        theirMSrec.set_tag(self.parent.get_ri_tag(),ri)
-                        self.nistRecords.append(theirMSrec)
+                        if not theirMSrec:
+                            theirMSrec = MassSpectrum(self.parent, libid, lib+libid, fromNIST=True)
+                            theirMSrec.set_name(name)
+                            theirMSrec.set_tag('Formula',formula)
+                            theirMSrec.set_tag('CAS#',casnum)
+                            theirMSrec.set_tag('MW',molwt)
+                            theirMSrec.set_tag(self.parent.get_ri_tag(),ri)
+                            self.nistRecords.append(theirMSrec)
                         pairs.append([[myMSrec,theirMSrec],fmatch,rmatch,prob])
         return pairs
                     
-                    
-                    
-                
-                
-                
-                
+    def nistLineToDict(self, line):
+        parts = line.split(';')
+        # pick out the chemical name (UID for us)
+        d = {}
+        uid = parts[0]
+        p = uid.find('<<')
+        uid = uid[p+2:]
+        uid = uid.replace('>>','')
+        d['Name'] = uid
+        # pick out the formula
+        formula = parts[1].replace('<<','').replace('>>','')
+        d['Formula'] = formula
+        for i in range(2,len(parts)):
+            colpos = parts[i].find(':')
+            key = parts[i][0:colpos].strip()
+            value = parts[i][colpos+1:].replace('<<','').replace('>>','').strip()
+            d[key] = value
+        return d                
        
     def get_current_from_recnum(self):
         return self.fromRecNum
@@ -367,7 +415,7 @@ class MSMatcher(object):
         margin = self.marginRI
         libSize = len(self.fromLib)
         numPairs = ((libSize ** 2)-libSize)/2
-        checkables = []
+        self.checkables = []
         self.cancelled = False
         starttime = datetime.now()
         print("starting list walk using itertools.combinations...")
@@ -379,7 +427,7 @@ class MSMatcher(object):
                 # This passes on there being any intersection between the top three ions of each MS
                 if f.major_ions & t.major_ions:
 #            if self.compare(f,t,margin):
-                    checkables.append((f,t))
+                    self.checkables.append((f,t))
             self.checkablesChecked +=1        
         endtime = datetime.now()
         interval = endtime - starttime
@@ -392,10 +440,10 @@ class MSMatcher(object):
         print(mes)
         # now that we have filtered for pairs that are worth running the MS algorithm on, do the MS match
         print("starting MS matching...")
-        self.numMatchables = len(checkables)
+        self.numMatchables = len(self.checkables)
         starttime = datetime.now()
         likelyTh = self.likelyTh
-        for pair in checkables:
+        for pair in self.checkables:
             if self.cancelled:
                 return
             fMatchFact = pair[0].match_factor(pair[1])
@@ -407,7 +455,7 @@ class MSMatcher(object):
         endtime = datetime.now()
         interval = endtime - starttime
         secs = interval.total_seconds()
-        opTime = secs/len(checkables)
+        opTime = secs/len(self.checkables)
         opTimeStr = '{:.6f} secs per match operation'.format(opTime)
         mes = ' Finished MS matching in %d seconds, %d minutes, %d hours'%(secs, secs/60, secs/(60*60))
         print(mes)

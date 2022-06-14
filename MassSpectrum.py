@@ -172,12 +172,15 @@ class MassSpectrum(object):
                     self.comment_tags[ckey] = cvalue
             self.tags[key] = rest.strip()
              
-    def to_msp_text(self):
+    def to_msp_text(self, forNIST=False):
         msp=''
         if "Comments" not in self.tags.keys():
             self.set_tag('Comments', '')
         for key in self.tags.keys():
             val = self.tags[key]
+            if forNIST:
+                if key.lower() == 'name':
+                    val = self.get_uid()
             msp += key+': '+val
             if key.lower() == 'comments':
                 for ckey in self.comment_tags.keys():
@@ -191,6 +194,9 @@ class MassSpectrum(object):
         return msp    
 
     def to_msp_text_for_NIST_search(self):
+        msp = self.to_msp_text(forNIST=True)
+        return msp
+        '''
         msp=''
         msp += 'NAME: '+ self.get_uid()+"\n"
         if "Comments" not in self.tags.keys():
@@ -203,7 +209,8 @@ class MassSpectrum(object):
         for key in self.ms:
             msp += str(key)+' '+str(self.ms[key]) + ' ; '
         msp += '\n\n'
-        return msp    
+        return msp
+        '''    
               
       
     def add_mass_spec_from_msp_line(self,line):

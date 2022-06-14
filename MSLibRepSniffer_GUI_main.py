@@ -61,7 +61,7 @@ class MatchThread(QtCore.QThread):
 class AppWindow(QtWidgets.QMainWindow,Ui_MainWindow):
     
     def __init__(self):
-        self.version = '0.92'
+        self.version = '0.95'
         QtWidgets.QMainWindow.__init__(self)
         Ui_MainWindow.__init__(self)
         self.setupUi(self)
@@ -376,6 +376,13 @@ class AppWindow(QtWidgets.QMainWindow,Ui_MainWindow):
         
     def check_matcher(self):
         if self.fromLibBox.get_lib():
+            logFileName = ''
+            if self.logMatches_cb.isChecked():
+                name = QFileDialog.getSaveFileName(self, 'Save Matches to File', self.lastDirectory, 'csv(*.csv)', '')
+                if name[0]:
+                    logFileName = name[0]
+                else:
+                    return
             self.matchCount = 0
             self.matcher = None
             self.matchBox.clear()
@@ -394,6 +401,7 @@ class AppWindow(QtWidgets.QMainWindow,Ui_MainWindow):
             if self.clearOld_CB.isChecked():
                 searchFlags[2]=True 
             self.matcher = MSMatcher(self,self.fromLibBox.get_lib(), self.get_likely_threshold(), self.use_ri(), self.get_ri_margin(), self.get_ri_tag(), self.get_NIST_threshold(),searchFlags)
+            self.matcher.setLogFileName(logFileName)
             self.matchThread = MSMatchThread(self, self.matcher)
             self.matchThread.updateProg.connect(self.set_progress)
             self.matchThread.matchDone.connect(self.match_complete)
@@ -578,39 +586,40 @@ class AppWindow(QtWidgets.QMainWindow,Ui_MainWindow):
             matcher = self.matcher
             self.matchBox.update_matcher()
             for ms in lib:
-                if not ms.is_struck():
-                    matchinx = matcher.find_match_for_ms(ms)
-                    confirmed = False
-                    matches = []
-                    if matchinx:
-                        i = matchinx[0]
-                        j = matchinx[1]
-                        matches.append(matcher.get_matched_ms(i).get_uid())
-                        hasConfirmed = False
-                        for k in range(0,matcher.get_num_matches(i)):
-                            confirmed = matcher.get_match_confirmed_flag(i,k)
-                            hasConfirmed |= confirmed
-                            if confirmed:
-                                matches.append(matcher.get_match_ms(i,k).get_uid())
-                        if (j<0 and hasConfirmed) or (j>=0 and matcher.get_match_confirmed_flag(i,j)):
-                            newname = matcher.get_matched_confirmed_name(i)
-                            ms.set_name(newname)
-                            if len(matches) > 1:
-                                if ms.get_uid() in matches:
-                                    try:
-                                        matches.remove(ms.get_uid())
-                                    except ValueError:
-                                        pass
-                                match_tag_val = ''
-                                for uid in matches:
-                                    match_tag_val += uid + ","
-                                match_tag_val = match_tag_val[:-1]
-                                ms.set_comment_tag('Confirmed_matches', match_tag_val)
-                    if forNIST:
-                        txt = ms.to_msp_text_for_NIST_search()
-                    else:
-                        txt = ms.to_msp_text()
-                    msp_file.write(txt+'\n')
+                if matcher:
+                    if not ms.is_struck():
+                        matchinx = matcher.find_match_for_ms(ms)
+                        confirmed = False
+                        matches = []
+                        if matchinx:
+                            i = matchinx[0]
+                            j = matchinx[1]
+                            matches.append(matcher.get_matched_ms(i).get_uid())
+                            hasConfirmed = False
+                            for k in range(0,matcher.get_num_matches(i)):
+                                confirmed = matcher.get_match_confirmed_flag(i,k)
+                                hasConfirmed |= confirmed
+                                if confirmed:
+                                    matches.append(matcher.get_match_ms(i,k).get_uid())
+                            if (j<0 and hasConfirmed) or (j>=0 and matcher.get_match_confirmed_flag(i,j)):
+                                newname = matcher.get_matched_confirmed_name(i)
+                                ms.set_name(newname)
+                                if len(matches) > 1:
+                                    if ms.get_uid() in matches:
+                                        try:
+                                            matches.remove(ms.get_uid())
+                                        except ValueError:
+                                            pass
+                                    match_tag_val = ''
+                                    for uid in matches:
+                                        match_tag_val += uid + ","
+                                    match_tag_val = match_tag_val[:-1]
+                                    ms.set_comment_tag('Confirmed_matches', match_tag_val)
+                if forNIST:
+                    txt = ms.to_msp_text_for_NIST_search()
+                else:
+                    txt = ms.to_msp_text()
+                msp_file.write(txt+'\n')
         msp_file.close()
                         
                     
